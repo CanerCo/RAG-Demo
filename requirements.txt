@@ -1,0 +1,6 @@
+transoformers
+sentence-transoformers
+faiss-cpu
+gradio
+streamlit
+numpy
