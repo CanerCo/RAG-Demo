@@ -1,66 +1,38 @@
-import streamlit as st
-import numpy as np
-from sentence_transformers import SentenceTransformer
-
-embedding_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+import gradio as gr
+from rag_pipeline import chatbot_fn, normalize_gradio_history, answer_query_with_history, LAST_DEBUG
 
 
-import numpy as np
-import json
+with gr.Blocks() as demo:
+    gr.Markdown("## Day 5 RAG + Chat History (with Debug)")
+    chat = gr.Chatbot()
+    msg = gr.Textbox(placeholder="Ask something…")
+    clear = gr.Button("Clear")
 
-vectors = np.load("./data/embeddings.npy")
+    with gr.Accordion("Debug (what the model sees)", open=False):
+        dbg_retrieval = gr.Textbox(label="Retrieval Query", lines=2)
+        dbg_prompt = gr.Textbox(label="Final Prompt", lines=18)
 
-with open('./data/chunks.json', "r") as f:
-    chunks_list = json.load(f)
+    def respond(message, history):
+        # history is a list of {"role": ..., "content": ...} dicts in messages mode
+        history_pairs = normalize_gradio_history(history)  # your helper: -> list[(user, assistant)]
+        answer = answer_query_with_history(message, history_pairs)
 
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+        history = history or []
+        history = history + [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": answer},
+        ]
 
-model_name = "google/flan-t5-base"
-model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+        return history, "", LAST_DEBUG.get("retrieval_query",""), LAST_DEBUG.get("prompt","")
 
-def retrieve(query, vectors, chunks_list, model):
-    q_vec = model.encode([query])[0]
-    # Compute cosine similarty between q_vec and all chunk vectors
-    scores = np.dot(vectors, q_vec) / (np.linalg.norm(vectors, axis=1) * np.linalg.norm(q_vec) + 1e-9)
-    top_indx = int(np.argmax(scores))
-    return chunks_list[top_indx], scores[top_indx]
+    msg.submit(respond, [msg, chat], [chat, msg, dbg_retrieval, dbg_prompt])
+    clear.click(lambda: ([], "", "", ""), None, [chat, msg, dbg_retrieval, dbg_prompt])
 
-def generate_answer(prompt):
-    inputs = tokenizer(prompt, return_tensors='pt')
-    outputs = model.generate(**inputs, max_length=500)
-    return tokenizer.decode(outputs[0], skip_special_tokens = True)
-
-
-def answer_query(query):
-    context = retrieve(query, vectors, chunks_list, embedding_model)
-    prompt =  f"""
-                You are a QA assistant.
-
-                Rules:
-                - Use the context as the ONLY source of factual information.
-                - You may paraphrase and combine details into your own sentences.
-                - Do NOT add new facts that are not supported by the context.
-                - If the context does not contain the answer, say exactly: I do not know.
-
-                Task:
-                Answer the question in your own words.
-
-                Context:
-                {context}
-
-                Question: {query}
-
-                Answer:"""
-    answer = generate_answer(prompt)
-    return answer
+demo.launch()
 
 
-st.title("RAG QA System")
-st.write("Ask a question and get an answer from the documents.")
 
-query = st.text_input("Your question:")
-if query:
-    answer = answer_query(query)
-    st.write("**Answer:**" + answer)
+
+# --- Gradio ----
+
 
